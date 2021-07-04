@@ -1,3 +1,5 @@
+#![no_std]
+
 use embedded_hal::blocking::{
     delay::DelayMs,
     i2c::{Read, Write, WriteRead},
