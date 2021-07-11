@@ -14,6 +14,10 @@ const AXP202_IC_TYPE: u8 = 0x03;
 const AXP202_LDO234_DC23_CTL: u8 = 0x12;
 const AXP202_BATT_PERCENTAGE: u8 = 0xb9;
 
+const AXP202_BATT_VOLTAGE_STEP: f32 = 1.1;
+const AXP202_BAT_AVERVOL_H8: u8 = 0x78;
+const AXP202_BAT_AVERVOL_L4: u8 = 0x79;
+
 const AXP202_DCDC3: u8 = 1;
 const AXP202_LDO2: u8 = 2;
 
@@ -147,7 +151,7 @@ impl<I2C: Read + Write + WriteRead> AXP20X<I2C> {
             return Err(AXPError::UnsupportedOperation);
         }
         let mut val: [u8; 1] = [0];
-        if self.is_battery_connect()? {
+        if !self.is_battery_connect()? {
             return Ok(0);
         }
         self.i2c
@@ -158,12 +162,23 @@ impl<I2C: Read + Write + WriteRead> AXP20X<I2C> {
         }
         Ok(0)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    pub fn get_battery_voltage(&mut self) -> Result<f32, AXPError> {
+        if !self.init {
+            return Err(AXPError::InvalidState);
+        }
+        let mut hv: [u8; 1] = [0];
+        let mut lv: [u8; 1] = [0];
+
+        self.i2c
+            .write_read(AXP202_SLAVE_ADDRESS, &[AXP202_BAT_AVERVOL_H8], &mut hv)
+            .map_err(|_e| AXPError::ReadError)?;
+        self.i2c
+            .write_read(AXP202_SLAVE_ADDRESS, &[AXP202_BAT_AVERVOL_L4], &mut lv)
+            .map_err(|_e| AXPError::ReadError)?;
+
+        return Ok(
+            (((hv[0] as u16) << 4) | ((lv[0] as u16) & 0x0F)) as f32 * AXP202_BATT_VOLTAGE_STEP
+        );
     }
 }
