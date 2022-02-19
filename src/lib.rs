@@ -5,7 +5,10 @@ use embedded_hal::blocking::{
     i2c::{Write, WriteRead},
 };
 
-use core::ops::{BitAnd, BitOr};
+use core::{
+    convert::From,
+    ops::{BitAnd, BitOr},
+};
 
 use bitmask_enum::bitmask;
 use num_enum::{FromPrimitive, IntoPrimitive};
@@ -183,9 +186,15 @@ enum ChipId {
 }
 
 #[derive(Debug)]
-pub enum AxpError {
-    I2cError,
+pub enum AxpError<E> {
     Uninitialized,
+    I2cError(E),
+}
+
+impl<E> From<E> for AxpError<E> {
+    fn from(err: E) -> Self {
+        Self::I2cError(err)
+    }
 }
 
 pub struct Axpxx<I2C>
@@ -202,9 +211,9 @@ enum State {
     Initialized(ChipId),
 }
 
-impl<I2C> Axpxx<I2C>
+impl<I2C, E> Axpxx<I2C>
 where
-    I2C: Write + WriteRead,
+    I2C: Write<Error = E> + WriteRead<Error = E>,
 {
     pub fn new(i2c: I2C) -> Self {
         Self {
@@ -222,84 +231,80 @@ where
         }
     }
 
-    pub fn init(&mut self) -> Result<(), AxpError> {
+    pub fn init(&mut self) -> Result<(), E> {
         let chip_id = self.probe_chip()?;
         self.state = State::Initialized(chip_id);
         Ok(())
     }
 
-    fn read_reg(&mut self, reg: Register) -> Result<u8, AxpError> {
+    fn read_reg(&mut self, reg: Register) -> Result<u8, E> {
         let mut buf = [0u8; 1];
         let read_buf = [reg.into(); 1];
-        self.i2c
-            .write_read(self.address, &read_buf, &mut buf)
-            .map_err(|_| AxpError::I2cError)
-            .and_then(|_| Ok(buf[0]))
+        self.i2c.write_read(self.address, &read_buf, &mut buf)?;
+        Ok(buf[0])
     }
 
-    fn write_reg(&mut self, reg: Register, val: u8) -> Result<(), AxpError> {
-        self.i2c
-            .write(self.address, &[reg.into(), val])
-            .map_err(|_| AxpError::I2cError)
+    fn write_reg(&mut self, reg: Register, val: u8) -> Result<(), E> {
+        self.i2c.write(self.address, &[reg.into(), val])
     }
 
-    fn probe_chip(&mut self) -> Result<ChipId, AxpError> {
+    fn probe_chip(&mut self) -> Result<ChipId, E> {
         let chip_id = self.read_reg(Register::IcType)?;
         Ok(ChipId::from(chip_id))
     }
 
-    pub fn is_acin_present(&mut self) -> Result<bool, AxpError> {
+    pub fn is_acin_present(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinPresence))
     }
 
-    pub fn is_acin_usable(&mut self) -> Result<bool, AxpError> {
+    pub fn is_acin_usable(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinUsable))
     }
 
-    pub fn is_vbus_present(&mut self) -> Result<bool, AxpError> {
+    pub fn is_vbus_present(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::VbusPresence))
     }
 
-    pub fn is_vbus_usable(&mut self) -> Result<bool, AxpError> {
+    pub fn is_vbus_usable(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::VbusUsable))
     }
 
-    pub fn is_vbus_above(&mut self) -> Result<bool, AxpError> {
+    pub fn is_vbus_above(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::VbusAbove))
     }
 
-    pub fn is_battery_charging(&mut self) -> Result<bool, AxpError> {
+    pub fn is_battery_charging(&mut self) -> Result<bool, E> {
         let raw_charge1 = self.read_reg(Register::Charge1)?;
         Ok(Charge(raw_charge1).intersects(Charge::Charging))
     }
 
-    pub fn is_acin_vbus_shortcircuit(&mut self) -> Result<bool, AxpError> {
+    pub fn is_acin_vbus_shortcircuit(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinVbusShortCircuit))
     }
 
-    pub fn is_bootsource_acin_vbus(&mut self) -> Result<bool, AxpError> {
+    pub fn is_bootsource_acin_vbus(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::BootSource))
     }
 
-    pub fn get_battery_percentage(&mut self) -> Result<u8, AxpError> {
+    pub fn get_battery_percentage(&mut self) -> Result<u8, E> {
         self.read_reg(Register::BatteryPercentage)
     }
 
-    pub fn get_battery_voltage(&mut self) -> Result<f32, AxpError> {
+    pub fn get_battery_voltage(&mut self) -> Result<f32, E> {
         let battery_high_8b = self.read_reg(Register::BatteryAverageVoltageHigh8b)?;
         let battery_low_4b = self.read_reg(Register::BatteryAverageVoltageLow4b)?;
         Ok(
@@ -308,7 +313,7 @@ where
         )
     }
 
-    pub fn toggle_irq(&mut self, irqs: EventsIrq, enable: bool) -> Result<(), AxpError> {
+    pub fn toggle_irq(&mut self, irqs: EventsIrq, enable: bool) -> Result<(), E> {
         if irqs.is_int1() {
             let irq1 = self.read_reg(Register::EnabledIrq1)?;
             let irq1 = EventsIrq::from_int1_u8(irq1);
@@ -342,7 +347,7 @@ where
         Ok(())
     }
 
-    pub fn clear_irq(&mut self) -> Result<(), AxpError> {
+    pub fn clear_irq(&mut self) -> Result<(), E> {
         self.write_reg(Register::StatusIrq1, 0xFF)?;
         self.write_reg(Register::StatusIrq2, 0xFF)?;
         self.write_reg(Register::StatusIrq3, 0xFF)?;
@@ -351,7 +356,7 @@ where
         Ok(())
     }
 
-    pub fn read_irq(&mut self) -> Result<EventsIrq, AxpError> {
+    pub fn read_irq(&mut self) -> Result<EventsIrq, E> {
         let irq1 = self.read_reg(Register::StatusIrq1)?;
         let irq2 = self.read_reg(Register::StatusIrq2)?;
         let irq3 = self.read_reg(Register::StatusIrq3)?;
@@ -370,7 +375,7 @@ where
         channel: Power,
         state: PowerState,
         delay: &mut impl DelayMs<u32>,
-    ) -> Result<(), AxpError> {
+    ) -> Result<(), AxpError<E>> {
         match self.state {
             State::Uninitialized => Err(AxpError::Uninitialized),
             State::Initialized(chip_id) => {
@@ -398,7 +403,8 @@ where
                 if chip_id == ChipId::Axp202 {
                     data |= Power::DcDc3.into();
                 }
-                self.write_reg(Register::Ldo234Dc23Ctl, u8::from(data))
+                self.write_reg(Register::Ldo234Dc23Ctl, u8::from(data))?;
+                Ok(())
             }
         }
     }
