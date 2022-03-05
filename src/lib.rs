@@ -185,7 +185,6 @@ enum ChipId {
     Axp173 = 0xAD,
 }
 
-#[derive(Debug)]
 pub enum AxpError<E> {
     Uninitialized,
     I2cError(E),
