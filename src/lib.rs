@@ -16,12 +16,14 @@ use num_enum::{FromPrimitive, IntoPrimitive};
 const DEFAULT_AXP202_SLAVE_ADDR: u8 = 0x35;
 const BATTERY_VOLTAGE_STEP: f32 = 1.1;
 
+/// Power state for the different modules
 #[derive(Debug)]
 pub enum PowerState {
     On,
     Off,
 }
 
+/// Power source status
 #[bitmask(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PowerInputStatus {
@@ -35,6 +37,7 @@ pub enum PowerInputStatus {
     AcinPresence = Self(1 << 7),
 }
 
+/// Power module
 #[bitmask(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Power {
@@ -52,6 +55,7 @@ pub enum Charge {
     Charging = Self(1 << 7),
 }
 
+/// Interrupt sources
 #[bitmask(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventsIrq {
@@ -152,6 +156,8 @@ impl EventsIrq {
     }
 }
 
+/// AXP20x registers
+#[allow(dead_code)]
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, IntoPrimitive)]
 enum Register {
@@ -175,6 +181,7 @@ enum Register {
     BatteryPercentage = 0xB9,
 }
 
+/// AXP20x chip ids
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, IntoPrimitive, FromPrimitive)]
 enum ChipId {
@@ -185,6 +192,7 @@ enum ChipId {
     Axp173 = 0xAD,
 }
 
+/// AXP20x errors
 pub enum AxpError<E> {
     Uninitialized,
     I2cError(E),
@@ -196,6 +204,7 @@ impl<E> From<E> for AxpError<E> {
     }
 }
 
+/// AXP device representation
 pub struct Axpxx<I2C>
 where
     I2C: Write + WriteRead,
@@ -205,6 +214,7 @@ where
     state: State,
 }
 
+/// AXP device state
 enum State {
     Uninitialized,
     Initialized(ChipId),
@@ -214,6 +224,16 @@ impl<I2C, E> Axpxx<I2C>
 where
     I2C: Write<Error = E> + WriteRead<Error = E>,
 {
+    /// Create a new Axp20x device with the default slave address
+    ///
+    /// # Arguments
+    ///
+    /// - `i2c` I2C bus used to communicate with the device
+    ///
+    /// # Returns
+    ///
+    /// - [Axp20x driver](Axpxx) created
+    ///
     pub fn new(i2c: I2C) -> Self {
         Self {
             i2c,
@@ -222,6 +242,17 @@ where
         }
     }
 
+    /// Create a new Axp20x device with the default slave address
+    ///
+    /// # Arguments
+    ///
+    /// - `i2c` I2C bus used to communicate with the device
+    /// - `address` custom address for the device
+    ///
+    /// # Returns
+    ///
+    /// - [Axp20x driver](Axpxx) created
+    ///
     pub fn new_with_address(i2c: I2C, address: u8) -> Self {
         Self {
             i2c,
@@ -230,6 +261,7 @@ where
         }
     }
 
+    /// Initialize the device
     pub fn init(&mut self) -> Result<(), E> {
         let chip_id = self.probe_chip()?;
         self.state = State::Initialized(chip_id);
@@ -252,24 +284,44 @@ where
         Ok(ChipId::from(chip_id))
     }
 
+    /// Check if power ac is present
+    ///
+    /// # Returns
+    ///
+    /// - true if power AC is present, false otherwise
     pub fn is_acin_present(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinPresence))
     }
 
+    /// Check if power ac is usable
+    ///
+    /// # Returns
+    ///
+    /// - true if power AC is usable, false otherwise
     pub fn is_acin_usable(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinUsable))
     }
 
+    /// Check if VBus is present
+    ///
+    /// # Returns
+    ///
+    /// - true if VBus is present, false otherwise
     pub fn is_vbus_present(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::VbusPresence))
     }
 
+    /// Check if VBus is usable
+    ///
+    /// # Returns
+    ///
+    /// - true if VBus is usable, false otherwise
     pub fn is_vbus_usable(&mut self) -> Result<bool, E> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
@@ -282,6 +334,11 @@ where
         Ok(power_status.intersects(PowerInputStatus::VbusAbove))
     }
 
+    /// Check if battery is charging
+    ///
+    /// # Returns
+    ///
+    /// - true if battery is charging, false otherwise
     pub fn is_battery_charging(&mut self) -> Result<bool, E> {
         let raw_charge1 = self.read_reg(Register::Charge1)?;
         Ok(Charge(raw_charge1).intersects(Charge::Charging))
@@ -299,6 +356,11 @@ where
         Ok(power_status.intersects(PowerInputStatus::BootSource))
     }
 
+    /// Check battery percentage
+    ///
+    /// # Returns
+    ///
+    /// - Battery percentage
     pub fn get_battery_percentage(&mut self) -> Result<u8, E> {
         self.read_reg(Register::BatteryPercentage)
     }
@@ -369,6 +431,13 @@ where
             .bitor(EventsIrq::from_int5_u8(irq5)))
     }
 
+    /// Set power output for modules
+    ///
+    /// # Arguments
+    ///
+    /// - `channel`: [Power](Power) channel to manage
+    /// - `state`: [PowerState](PowerState) to set (On or Off)
+    /// - `delay`: [Delay source](embedded_hal::blocking::delay::DelayMs) to use
     pub fn set_power_output(
         &mut self,
         channel: Power,

@@ -2,7 +2,13 @@
 name = "axp20x"
 version = "0.0.1"
 edition = "2018"
+categories = ["embedded", "hardware-support"]
 authors = ["Pierre-Yves Aillet <pyaillet@gmail.com>"]
+description = "Rust driver for axp20x Power Management Unit"
+repository = "https://github.com/pyaillet/axp20x-rs"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
