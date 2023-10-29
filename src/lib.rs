@@ -1,9 +1,6 @@
 #![no_std]
 
-use embedded_hal::blocking::{
-    delay::DelayMs,
-    i2c::{Write, WriteRead},
-};
+use embedded_hal::{delay::DelayUs, i2c::I2c};
 
 use core::{
     convert::From,
@@ -193,21 +190,33 @@ enum ChipId {
 }
 
 /// AXP20x errors
-pub enum AxpError<E> {
+pub enum Error<E> {
     Uninitialized,
     I2cError(E),
 }
 
-impl<E> From<E> for AxpError<E> {
+impl<E> From<E> for Error<E> {
     fn from(err: E) -> Self {
         Self::I2cError(err)
+    }
+}
+
+impl<E> core::fmt::Debug for Error<E>
+where
+    E: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Uninitialized => write!(f, "Uninitialized"),
+            Self::I2cError(arg0) => f.debug_tuple("I2cError").field(arg0).finish(),
+        }
     }
 }
 
 /// AXP device representation
 pub struct Axpxx<I2C>
 where
-    I2C: Write + WriteRead,
+    I2C: I2c,
 {
     i2c: I2C,
     address: u8,
@@ -220,9 +229,9 @@ enum State {
     Initialized(ChipId),
 }
 
-impl<I2C, E> Axpxx<I2C>
+impl<I2C> Axpxx<I2C>
 where
-    I2C: Write<Error = E> + WriteRead<Error = E>,
+    I2C: I2c,
 {
     /// Create a new Axp20x device with the default slave address
     ///
@@ -262,24 +271,25 @@ where
     }
 
     /// Initialize the device
-    pub fn init(&mut self) -> Result<(), E> {
+    pub fn init(&mut self) -> Result<(), Error<I2C::Error>> {
         let chip_id = self.probe_chip()?;
         self.state = State::Initialized(chip_id);
         Ok(())
     }
 
-    fn read_reg(&mut self, reg: Register) -> Result<u8, E> {
+    fn read_reg(&mut self, reg: Register) -> Result<u8, Error<I2C::Error>> {
         let mut buf = [0u8; 1];
         let read_buf = [reg.into(); 1];
         self.i2c.write_read(self.address, &read_buf, &mut buf)?;
         Ok(buf[0])
     }
 
-    fn write_reg(&mut self, reg: Register, val: u8) -> Result<(), E> {
-        self.i2c.write(self.address, &[reg.into(), val])
+    fn write_reg(&mut self, reg: Register, val: u8) -> Result<(), Error<I2C::Error>> {
+        self.i2c.write(self.address, &[reg.into(), val])?;
+        Ok(())
     }
 
-    fn probe_chip(&mut self) -> Result<ChipId, E> {
+    fn probe_chip(&mut self) -> Result<ChipId, Error<I2C::Error>> {
         let chip_id = self.read_reg(Register::IcType)?;
         Ok(ChipId::from(chip_id))
     }
@@ -289,7 +299,7 @@ where
     /// # Returns
     ///
     /// - true if power AC is present, false otherwise
-    pub fn is_acin_present(&mut self) -> Result<bool, E> {
+    pub fn is_acin_present(&mut self) -> Result<bool, Error<I2C::Error>> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinPresence))
@@ -300,7 +310,7 @@ where
     /// # Returns
     ///
     /// - true if power AC is usable, false otherwise
-    pub fn is_acin_usable(&mut self) -> Result<bool, E> {
+    pub fn is_acin_usable(&mut self) -> Result<bool, Error<I2C::Error>> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinUsable))
@@ -311,7 +321,7 @@ where
     /// # Returns
     ///
     /// - true if VBus is present, false otherwise
-    pub fn is_vbus_present(&mut self) -> Result<bool, E> {
+    pub fn is_vbus_present(&mut self) -> Result<bool, Error<I2C::Error>> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::VbusPresence))
@@ -322,13 +332,13 @@ where
     /// # Returns
     ///
     /// - true if VBus is usable, false otherwise
-    pub fn is_vbus_usable(&mut self) -> Result<bool, E> {
+    pub fn is_vbus_usable(&mut self) -> Result<bool, Error<I2C::Error>> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::VbusUsable))
     }
 
-    pub fn is_vbus_above(&mut self) -> Result<bool, E> {
+    pub fn is_vbus_above(&mut self) -> Result<bool, Error<I2C::Error>> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::VbusAbove))
@@ -339,18 +349,18 @@ where
     /// # Returns
     ///
     /// - true if battery is charging, false otherwise
-    pub fn is_battery_charging(&mut self) -> Result<bool, E> {
+    pub fn is_battery_charging(&mut self) -> Result<bool, Error<I2C::Error>> {
         let raw_charge1 = self.read_reg(Register::Charge1)?;
         Ok(Charge(raw_charge1).intersects(Charge::Charging))
     }
 
-    pub fn is_acin_vbus_shortcircuit(&mut self) -> Result<bool, E> {
+    pub fn is_acin_vbus_shortcircuit(&mut self) -> Result<bool, Error<I2C::Error>> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::AcinVbusShortCircuit))
     }
 
-    pub fn is_bootsource_acin_vbus(&mut self) -> Result<bool, E> {
+    pub fn is_bootsource_acin_vbus(&mut self) -> Result<bool, Error<I2C::Error>> {
         let power_status = self.read_reg(Register::PowerInputStatus)?;
         let power_status = PowerInputStatus(power_status);
         Ok(power_status.intersects(PowerInputStatus::BootSource))
@@ -361,11 +371,11 @@ where
     /// # Returns
     ///
     /// - Battery percentage
-    pub fn get_battery_percentage(&mut self) -> Result<u8, E> {
+    pub fn get_battery_percentage(&mut self) -> Result<u8, Error<I2C::Error>> {
         self.read_reg(Register::BatteryPercentage)
     }
 
-    pub fn get_battery_voltage(&mut self) -> Result<f32, E> {
+    pub fn get_battery_voltage(&mut self) -> Result<f32, Error<I2C::Error>> {
         let battery_high_8b = self.read_reg(Register::BatteryAverageVoltageHigh8b)?;
         let battery_low_4b = self.read_reg(Register::BatteryAverageVoltageLow4b)?;
         Ok(
@@ -374,7 +384,7 @@ where
         )
     }
 
-    pub fn toggle_irq(&mut self, irqs: EventsIrq, enable: bool) -> Result<(), E> {
+    pub fn toggle_irq(&mut self, irqs: EventsIrq, enable: bool) -> Result<(), Error<I2C::Error>> {
         if irqs.is_int1() {
             let irq1 = self.read_reg(Register::EnabledIrq1)?;
             let irq1 = EventsIrq::from_int1_u8(irq1);
@@ -408,7 +418,7 @@ where
         Ok(())
     }
 
-    pub fn clear_irq(&mut self) -> Result<(), E> {
+    pub fn clear_irq(&mut self) -> Result<(), Error<I2C::Error>> {
         self.write_reg(Register::StatusIrq1, 0xFF)?;
         self.write_reg(Register::StatusIrq2, 0xFF)?;
         self.write_reg(Register::StatusIrq3, 0xFF)?;
@@ -417,7 +427,7 @@ where
         Ok(())
     }
 
-    pub fn read_irq(&mut self) -> Result<EventsIrq, E> {
+    pub fn read_irq(&mut self) -> Result<EventsIrq, Error<I2C::Error>> {
         let irq1 = self.read_reg(Register::StatusIrq1)?;
         let irq2 = self.read_reg(Register::StatusIrq2)?;
         let irq3 = self.read_reg(Register::StatusIrq3)?;
@@ -442,10 +452,10 @@ where
         &mut self,
         channel: Power,
         state: PowerState,
-        delay: &mut impl DelayMs<u32>,
-    ) -> Result<(), AxpError<E>> {
+        delay: &mut impl DelayUs,
+    ) -> Result<(), Error<I2C::Error>> {
         match self.state {
-            State::Uninitialized => Err(AxpError::Uninitialized),
+            State::Uninitialized => Err(Error::Uninitialized),
             State::Initialized(chip_id) => {
                 // Before setting, the output cannot be all turned off
                 let mut data: u8;
