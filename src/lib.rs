@@ -447,12 +447,12 @@ where
     ///
     /// - `channel`: [Power](Power) channel to manage
     /// - `state`: [PowerState](PowerState) to set (On or Off)
-    /// - `delay`: [Delay source](embedded_hal::blocking::delay::DelayMs) to use
+    /// - `delay`: [Delay source](embedded_hal::blocking::delay::DelayNs) to use
     pub fn set_power_output(
         &mut self,
         channel: Power,
         state: PowerState,
-        delay: &mut impl DelayUs,
+        delay: &mut impl DelayNs,
     ) -> Result<(), Error<I2C::Error>> {
         match self.state {
             State::Uninitialized => Err(Error::Uninitialized),
