@@ -1,6 +1,6 @@
 #![no_std]
 
-use embedded_hal::{delay::DelayUs, i2c::I2c};
+use embedded_hal::{delay::DelayNs, i2c::I2c};
 
 use core::{
     convert::From,
